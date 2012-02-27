@@ -1,0 +1,27 @@
+Name:                MultiLevelDB
+Version:             0.1
+Synopsis:            Multiple index database, based with LevelDB
+Homepage:            http://github.com/wmoss/multileveldb
+License:             AllRightsReserved
+License-file:        LICENSE
+Author:              Will Moss
+Maintainer:          wbmoss@gmail.com
+Category:            Network
+Build-type:          Simple
+Cabal-version:       >=1.2
+
+Executable multileveldb
+  Main-is: Network/Server/MultiLevelDB/Server.hs
+
+  hs-source-dirs:      src
+
+  Build-depends:  base >=4 && < 5,
+                  bytestring >=0.9,
+                  attoparsec >=0.10 && < 0.11,
+                  attoparsec-binary>0.1 && < 0.2,
+                  protocol-buffers>=2.0 && < 2.1,
+                  blaze-builder>=0.3 && <0.4,
+                  scalable-server
+
+  Extensions: OverloadedStrings
+  Ghc-Options: -threaded -rtsopts -O2 -funfolding-use-threshold=16 -fexcess-precision -feager-blackholing
