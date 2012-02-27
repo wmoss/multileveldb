@@ -1,0 +1,13 @@
+enum MultiLevelDBWireType {
+    MULTI_LEVELDB_GET = 1;
+    MULTI_LEVELDB_PUT = 2;
+}
+
+message GetRequest {
+    required bytes key = 1;
+}
+
+message PutRequest {
+    required bytes key = 1;
+    required bytes value = 2;
+}
