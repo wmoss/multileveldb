@@ -21,7 +21,8 @@ Executable multileveldb
                   attoparsec-binary>0.1 && < 0.2,
                   protocol-buffers>=2.0 && < 2.1,
                   blaze-builder>=0.3 && <0.4,
-                  scalable-server
+                  scalable-server,
+                  leveldb-haskell
 
   Extensions: OverloadedStrings
   Ghc-Options: -threaded -rtsopts -O2 -funfolding-use-threshold=16 -fexcess-precision -feager-blackholing
