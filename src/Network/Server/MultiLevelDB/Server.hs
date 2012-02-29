@@ -32,6 +32,8 @@ makeResponse code raw =
         blen = runPut $ putWord32le $ fromIntegral $ B.length raw
         bcode = runPut $ putWord32le $ fromIntegral $ fromEnum code
 
+makeQueryResponse = makeResponse MULTI_LEVELDB_QUERY_RESP . messagePut . Query.QueryResponse
+
 decodeProto raw = case messageGet raw of
     Right x -> fst x
     Left e -> error "Failed to decode proto"
@@ -57,7 +59,7 @@ handleRequest :: DB -> TVar Integer -> Request -> IO Builder
 handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
-        Just v -> return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_QUERY_RESP $ messagePut $ Query.QueryResponse $ Seq.singleton $ sTol v
+        Just v -> return $ copyLazyByteString $ makeQueryResponse $ Seq.singleton $ sTol v
         Nothing -> return $ copyByteString "MISSING\r\n"
     where
         obj = decodeProto raw :: Get.GetRequest
@@ -75,7 +77,7 @@ handleRequest db incr (Request MULTI_LEVELDB_LOOKUP raw) = do
             withIterator db [ ] $ \iter -> do
                 iterFirst iter
                 res <- lookup field iter []
-                return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_QUERY_RESP $ messagePut $ Query.QueryResponse $ Seq.fromList $ map (runPut . putDocument) res
+                return $ copyLazyByteString $ makeQueryResponse $ Seq.fromList $ map (runPut . putDocument) res
         otherwise -> error "Currently, multifield queries are not supported"
     where
         obj = decodeProto raw :: Lookup.LookupRequest
