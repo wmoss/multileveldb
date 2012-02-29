@@ -21,7 +21,7 @@ import Network.Server.MultiLevelDB.Proto.Request.MultiLevelDBWireType
 import Network.Server.MultiLevelDB.Proto.Request.GetRequest as Get
 import Network.Server.MultiLevelDB.Proto.Request.PutRequest as Put
 import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
-import Network.Server.MultiLevelDB.Proto.Request.LookupResponse as LookupResp
+import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
 
 
 data Request = Request MultiLevelDBWireType B.ByteString
@@ -57,7 +57,7 @@ handleRequest :: DB -> TVar Integer -> Request -> IO Builder
 handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
-        Just v -> return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_LOOKUP_RESP $ messagePut $ LookupResp.LookupResponse $ Seq.singleton $ sTol v
+        Just v -> return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_QUERY_RESP $ messagePut $ Query.QueryResponse $ Seq.singleton $ sTol v
         Nothing -> return $ copyByteString "MISSING\r\n"
     where
         obj = decodeProto raw :: Get.GetRequest
@@ -75,7 +75,7 @@ handleRequest db incr (Request MULTI_LEVELDB_LOOKUP raw) = do
             withIterator db [ ] $ \iter -> do
                 iterFirst iter
                 res <- lookup field iter []
-                return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_LOOKUP_RESP $ messagePut $ LookupResp.LookupResponse $ Seq.fromList $ map (runPut . putDocument) res
+                return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_QUERY_RESP $ messagePut $ Query.QueryResponse $ Seq.fromList $ map (runPut . putDocument) res
         otherwise -> error "Currently, multifield queries are not supported"
     where
         obj = decodeProto raw :: Lookup.LookupRequest

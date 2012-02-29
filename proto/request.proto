@@ -5,7 +5,7 @@ enum MultiLevelDBWireType {
     MULTI_LEVELDB_LOOKUP = 3;
 
     /* Responses */
-    MULTI_LEVELDB_LOOKUP_RESP = 100;
+    MULTI_LEVELDB_QUERY_RESP = 100;
 }
 
 message GetRequest {
@@ -20,6 +20,6 @@ message LookupRequest {
     required bytes query = 1;
 }
 
-message LookupResponse {
+message QueryResponse {
     repeated bytes results = 1;
 }
