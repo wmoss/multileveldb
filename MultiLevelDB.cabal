@@ -23,7 +23,9 @@ Executable multileveldb
                   blaze-builder>=0.3 && <0.4,
                   scalable-server>=0.2.2 && < 0.3,
                   leveldb-haskell<0.1,
-                  binary>=0.5.1 && <0.6
+                  binary>=0.5.1 && <0.6,
+                  bson>=0.1.7 && <0.2,
+                  containers>=0.4.2.1 && < 0.5
 
   Extensions: OverloadedStrings
   Ghc-Options: -threaded -rtsopts -O2 -funfolding-use-threshold=16 -fexcess-precision -feager-blackholing

@@ -1,6 +1,11 @@
 enum MultiLevelDBWireType {
+    /* Requests */
     MULTI_LEVELDB_GET = 1;
     MULTI_LEVELDB_PUT = 2;
+    MULTI_LEVELDB_LOOKUP = 3;
+
+    /* Responses */
+    MULTI_LEVELDB_LOOKUP_RESP = 100;
 }
 
 message GetRequest {
@@ -9,4 +14,12 @@ message GetRequest {
 
 message PutRequest {
     required bytes value = 1;
+}
+
+message LookupRequest {
+    required bytes query = 1;
+}
+
+message LookupResponse {
+    repeated bytes results = 1;
 }

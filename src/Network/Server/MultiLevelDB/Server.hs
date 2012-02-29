@@ -6,18 +6,31 @@ import qualified Data.Attoparsec.Binary as AttoB
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as S
 import Blaze.ByteString.Builder (Builder)
-import Blaze.ByteString.Builder.ByteString (copyByteString)
+import Blaze.ByteString.Builder.ByteString (copyByteString, copyLazyByteString)
 
 import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Data.Binary.Put (runPut, putWord32le)
+import Data.Binary.Get (runGet)
+import qualified Data.Sequence as Seq
 
-import Text.ProtocolBuffers.WireMessage (messageGet)
+import Data.Bson (Document, Field)
+import Data.Bson.Binary (getDocument, putDocument)
+
+import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
 import Network.Server.MultiLevelDB.Proto.Request.MultiLevelDBWireType
 import Network.Server.MultiLevelDB.Proto.Request.GetRequest as Get
 import Network.Server.MultiLevelDB.Proto.Request.PutRequest as Put
+import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
+import Network.Server.MultiLevelDB.Proto.Request.LookupResponse as LookupResp
 
 
 data Request = Request MultiLevelDBWireType B.ByteString
+
+makeResponse code raw =
+    B.concat [ bcode, blen, raw ]
+    where
+        blen = runPut $ putWord32le $ fromIntegral $ B.length raw
+        bcode = runPut $ putWord32le $ fromIntegral $ fromEnum code
 
 decodeProto raw = case messageGet raw of
     Right x -> fst x
@@ -54,6 +67,30 @@ handleRequest db incr (Request MULTI_LEVELDB_PUT raw) = do
     return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
+
+handleRequest db incr (Request MULTI_LEVELDB_LOOKUP raw) = do
+    case runGet getDocument $ Lookup.query obj of
+        [field] -> do
+            withIterator db [ ] $ \iter -> do
+                iterFirst iter
+                res <- lookup field iter []
+                return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_LOOKUP_RESP $ messagePut $ LookupResp.LookupResponse $ Seq.fromList $ map (runPut . putDocument) res
+        otherwise -> error "Currently, multifield queries are not supported"
+    where
+        obj = decodeProto raw :: Lookup.LookupRequest
+
+        lookup :: Field -> Iterator -> [Document] -> IO [Document]
+        lookup field iter res = do
+            valid <- iterValid iter
+            case valid of
+                True -> do
+                    val <- iterValue iter
+                    _   <- iterNext iter
+                    let d = runGet getDocument $ B.fromChunks [val]
+                    case any (== field) d of
+                        True -> lookup field iter $ d : res
+                        False -> lookup field iter res
+                False -> return res
 
 main = do
     incr <- newTVarIO 0
