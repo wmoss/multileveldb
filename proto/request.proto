@@ -8,6 +8,5 @@ message GetRequest {
 }
 
 message PutRequest {
-    required bytes key = 1;
-    required bytes value = 2;
+    required bytes value = 1;
 }

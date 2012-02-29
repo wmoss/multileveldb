@@ -8,6 +8,9 @@ import qualified Data.ByteString.Char8 as S
 import Blaze.ByteString.Builder (Builder)
 import Blaze.ByteString.Builder.ByteString (copyByteString)
 
+import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
+import Data.Binary.Put (runPut, putWord32le)
+
 import Text.ProtocolBuffers.WireMessage (messageGet)
 import Network.Server.MultiLevelDB.Proto.Request.MultiLevelDBWireType
 import Network.Server.MultiLevelDB.Proto.Request.GetRequest as Get
@@ -22,6 +25,12 @@ decodeProto raw = case messageGet raw of
 
 lTos = S.concat . B.toChunks
 
+getIndex :: TVar Integer -> IO Integer
+getIndex incr = atomically $ do
+    v <- readTVar incr
+    writeTVar incr $ v + 1
+    return v
+
 parseRequest :: Atto.Parser Request
 parseRequest = do
     rid <- fmap (toEnum . fromIntegral) AttoB.anyWord32le
@@ -29,9 +38,9 @@ parseRequest = do
     raw <- Atto.take $ fromIntegral size
     return $ Request rid $ B.fromChunks [raw]
 
-handleRequest :: DB -> Request -> IO Builder
+handleRequest :: DB -> TVar Integer -> Request -> IO Builder
 
-handleRequest db (Request MULTI_LEVELDB_GET raw) = do
+handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
         Just v -> return $ copyByteString $ S.concat [v, "\r\n"]
@@ -39,14 +48,16 @@ handleRequest db (Request MULTI_LEVELDB_GET raw) = do
     where
         obj = decodeProto raw :: Get.GetRequest
 
-handleRequest db (Request MULTI_LEVELDB_PUT raw) = do
-    put db [ ] (lTos $ Put.key obj) (lTos $ Put.value obj)
-    return $ copyByteString "OK\r\n"
+handleRequest db incr (Request MULTI_LEVELDB_PUT raw) = do
+    key <- fmap (lTos . runPut . putWord32le . fromIntegral) $ getIndex incr
+    put db [ ] key (lTos $ Put.value obj)
+    return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
 
 main = do
+    incr <- newTVarIO 0
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
-        runServer (pipe db) 4455
+        runServer (pipe db incr) 4455
     where
-        pipe db = RequestPipeline parseRequest (handleRequest db) 10
+        pipe db incr = RequestPipeline parseRequest (handleRequest db incr) 10
