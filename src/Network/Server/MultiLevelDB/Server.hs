@@ -37,6 +37,7 @@ decodeProto raw = case messageGet raw of
     Left e -> error "Failed to decode proto"
 
 lTos = S.concat . B.toChunks
+sTol = B.fromChunks . (:[])
 
 getIndex :: TVar Integer -> IO Integer
 getIndex incr = atomically $ do
@@ -56,7 +57,7 @@ handleRequest :: DB -> TVar Integer -> Request -> IO Builder
 handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
-        Just v -> return $ copyByteString $ S.concat [v, "\r\n"]
+        Just v -> return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_LOOKUP_RESP $ messagePut $ LookupResp.LookupResponse $ Seq.singleton $ sTol v
         Nothing -> return $ copyByteString "MISSING\r\n"
     where
         obj = decodeProto raw :: Get.GetRequest
