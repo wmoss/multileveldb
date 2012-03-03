@@ -9,7 +9,7 @@ import Blaze.ByteString.Builder (Builder)
 import Blaze.ByteString.Builder.ByteString (copyByteString, copyLazyByteString)
 
 import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
-import Data.Binary.Put (runPut, putWord32le)
+import Data.Binary.Put (runPut, putWord32le, putWord8)
 import Data.Binary.Get (runGet)
 import qualified Data.Sequence as Seq
 
@@ -65,8 +65,10 @@ handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
         obj = decodeProto raw :: Get.GetRequest
 
 handleRequest db incr (Request MULTI_LEVELDB_PUT raw) = do
-    key <- fmap (lTos . runPut . putWord32le . fromIntegral) $ getIndex incr
-    put db [ ] key (lTos $ Put.value obj)
+    key <- fmap (lTos . runPut) $ do
+        return $ putWord8 1
+        fmap (putWord32le . fromIntegral) $ getIndex incr
+    put db [ ] key $ (lTos $ Put.value obj)
     return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
