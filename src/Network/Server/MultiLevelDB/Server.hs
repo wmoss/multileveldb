@@ -113,7 +113,7 @@ handleRequest db incr (Request MULTI_LEVELDB_PUT raw) = do
     where
         obj = decodeProto raw :: Put.PutRequest
 
-handleRequest db incr (Request MULTI_LEVELDB_LOOKUP raw) = do
+handleRequest db _ (Request MULTI_LEVELDB_LOOKUP raw) = do
     case runGet getDocument $ Lookup.query obj of
         [field] -> do
             withIterator db [ ] $ \iter -> do
