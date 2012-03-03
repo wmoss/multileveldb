@@ -7,10 +7,11 @@ import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as S
 import Blaze.ByteString.Builder (Builder)
 import Blaze.ByteString.Builder.ByteString (copyByteString, copyLazyByteString)
+import Data.Maybe (fromMaybe)
 
 import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
-import Data.Binary.Get (runGet)
+import Data.Binary.Get (runGet, getWord32le)
 import qualified Data.Sequence as Seq
 
 import Data.Bson (Document, Field)
@@ -41,11 +42,48 @@ decodeProto raw = case messageGet raw of
 lTos = S.concat . B.toChunks
 sTol = B.fromChunks . (:[])
 
+keyPrefix = B.head $ runPut $ putWord8 1
+
+makeKey :: Integer -> S.ByteString
+makeKey index = lTos $ runPut $ do
+    putWord8 1
+    putWord32le $ fromIntegral index
+
+loadIndex :: DB -> IO (TVar Integer)
+loadIndex db = do
+    last <- get db [ ] lastIndexKey
+    x <- case last of
+        Just v -> do
+            withIterator db [ ] $ \iter -> do
+              _ <- iterSeek iter $ S.cons keyPrefix v
+              fmap (toInteger . runGet getWord32le . sTol . S.tail) $ checkNext iter
+        Nothing -> return 0
+    newTVarIO $ x + 1
+    where
+        -- Since we don't have transaction support on LevelDB we have to
+        -- search ahead to make sure the value we wrote isn't stale
+        checkNext :: Iterator -> IO S.ByteString
+        checkNext iter = do
+            index <- iterKey iter
+            _ <- iterNext iter
+            valid <- iterValid iter
+            case valid of
+                 True -> do
+                     new <- iterKey iter
+                     if S.head new == keyPrefix
+                       then checkNext iter
+                       else return index
+                 False -> return index
+
 getIndex :: TVar Integer -> IO Integer
 getIndex incr = atomically $ do
     v <- readTVar incr
     writeTVar incr $ v + 1
     return v
+
+lastIndexKey = lTos $ runPut $ do
+    putWord8 0
+    putWord8 0
 
 parseRequest :: Atto.Parser Request
 parseRequest = do
@@ -65,10 +103,10 @@ handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
         obj = decodeProto raw :: Get.GetRequest
 
 handleRequest db incr (Request MULTI_LEVELDB_PUT raw) = do
-    key <- fmap (lTos . runPut) $ do
-        return $ putWord8 1
-        fmap (putWord32le . fromIntegral) $ getIndex incr
-    put db [ ] key $ (lTos $ Put.value obj)
+    index <- getIndex incr
+    let key = makeKey index
+    write db [ ] [ Put key $ lTos $ Put.value obj
+                 , Put lastIndexKey $ lTos $ runPut $ putWord32le $ fromIntegral index]
     return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
@@ -98,8 +136,8 @@ handleRequest db incr (Request MULTI_LEVELDB_LOOKUP raw) = do
                 False -> return res
 
 main = do
-    incr <- newTVarIO 0
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
+        incr <- loadIndex db
         runServer (pipe db incr) 4455
     where
         pipe db incr = RequestPipeline parseRequest (handleRequest db incr) 10
