@@ -98,7 +98,7 @@ handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
         Just v -> return $ copyLazyByteString $ makeQueryResponse $ Seq.singleton $ sTol v
-        Nothing -> return $ copyByteString "MISSING\r\n"
+        Nothing -> return $ copyLazyByteString $ makeQueryResponse $ Seq.empty
     where
         obj = decodeProto raw :: Get.GetRequest
 
