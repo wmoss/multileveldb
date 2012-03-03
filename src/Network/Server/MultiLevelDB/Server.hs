@@ -9,7 +9,7 @@ import Blaze.ByteString.Builder (Builder)
 import Blaze.ByteString.Builder.ByteString (copyByteString, copyLazyByteString)
 
 import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
-import Data.Binary.Put (runPut, putWord32le, putWord8)
+import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
 import Data.Binary.Get (runGet)
 import qualified Data.Sequence as Seq
 
@@ -27,10 +27,10 @@ import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
 data Request = Request MultiLevelDBWireType B.ByteString
 
 makeResponse code raw =
-    B.concat [ bcode, blen, raw ]
-    where
-        blen = runPut $ putWord32le $ fromIntegral $ B.length raw
-        bcode = runPut $ putWord32le $ fromIntegral $ fromEnum code
+    runPut $ do
+        putWord32le $ fromIntegral $ fromEnum code
+        putWord32le $ fromIntegral $ B.length raw
+        putLazyByteString raw
 
 makeQueryResponse = makeResponse MULTI_LEVELDB_QUERY_RESP . messagePut . Query.QueryResponse
 
