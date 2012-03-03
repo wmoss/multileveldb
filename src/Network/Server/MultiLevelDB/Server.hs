@@ -13,6 +13,7 @@ import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
 import Data.Binary.Get (runGet, getWord32le)
 import qualified Data.Sequence as Seq
+import GHC.Word (Word8)
 
 import Data.Bson (Document, Field)
 import Data.Bson.Binary (getDocument, putDocument)
@@ -44,14 +45,15 @@ sTol = B.fromChunks . (:[])
 
 keyPrefix = B.head $ runPut $ putWord8 1
 
-makeKey :: Integer -> S.ByteString
-makeKey index = lTos $ runPut $ do
-    putWord8 1
+makeKey :: Word8 -> Integer -> S.ByteString
+makeKey prefix index = lTos $ runPut $ do
+    putWord8 prefix
     putWord32le $ fromIntegral index
 
-loadIndex :: DB -> IO (TVar Integer)
-loadIndex db = do
-    last <- get db [ ] lastIndexKey
+makePrimaryKey = makeKey 1
+loadPrimaryIndex :: DB -> IO (TVar Integer)
+loadPrimaryIndex db = do
+    last <- get db [ ] lastPrimaryKey
     x <- case last of
         Just v -> do
             withIterator db [ ] $ \iter -> do
@@ -75,13 +77,13 @@ loadIndex db = do
                        else return index
                  False -> return index
 
-getIndex :: TVar Integer -> IO Integer
-getIndex incr = atomically $ do
+getPrimaryIndex :: TVar Integer -> IO Integer
+getPrimaryIndex incr = atomically $ do
     v <- readTVar incr
     writeTVar incr $ v + 1
     return v
 
-lastIndexKey = lTos $ runPut $ do
+lastPrimaryKey = lTos $ runPut $ do
     putWord8 0
     putWord8 0
 
@@ -103,10 +105,10 @@ handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
         obj = decodeProto raw :: Get.GetRequest
 
 handleRequest db incr (Request MULTI_LEVELDB_PUT raw) = do
-    index <- getIndex incr
-    let key = makeKey index
+    index <- getPrimaryIndex incr
+    let key = makePrimaryKey index
     write db [ ] [ Put key $ lTos $ Put.value obj
-                 , Put lastIndexKey $ lTos $ runPut $ putWord32le $ fromIntegral index]
+                 , Put lastPrimaryKey $ lTos $ runPut $ putWord32le $ fromIntegral index]
     return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
@@ -137,7 +139,7 @@ handleRequest db incr (Request MULTI_LEVELDB_LOOKUP raw) = do
 
 main = do
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
-        incr <- loadIndex db
+        incr <- loadPrimaryIndex db
         runServer (pipe db incr) 4455
     where
         pipe db incr = RequestPipeline parseRequest (handleRequest db incr) 10
