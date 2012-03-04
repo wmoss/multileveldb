@@ -75,7 +75,7 @@ getPrimaryIndex incr = atomically $ do
 
 lastPrimaryKey = lTos $ runPut $ do
     putWord8 0
-    putWord8 0
+    putWord8 1
 
 parseRequest :: Atto.Parser Request
 parseRequest = do
