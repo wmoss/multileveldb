@@ -23,6 +23,7 @@ import Network.Server.MultiLevelDB.Proto.Request.GetRequest as Get
 import Network.Server.MultiLevelDB.Proto.Request.PutRequest as Put
 import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
 import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
+import Network.Server.MultiLevelDB.Proto.Request.AddIndex as Index
 
 
 data Request = Request MultiLevelDBWireType B.ByteString
@@ -43,6 +44,7 @@ lTos = S.concat . B.toChunks
 sTol = B.fromChunks . (:[])
 
 keyPrefix = B.head $ runPut $ putWord8 1
+indexPrefix = B.head $ runPut $ putWord8 2
 
 makeKey :: Word8 -> Integer -> S.ByteString
 makeKey prefix index = lTos $ runPut $ do
@@ -50,6 +52,8 @@ makeKey prefix index = lTos $ runPut $ do
     putWord32le $ fromIntegral index
 
 makePrimaryKey = makeKey 1
+makeIndexKey = makeKey 2
+
 loadPrimaryIndex :: DB -> IO (TVar Integer)
 loadPrimaryIndex db = do
     last <- get db [ ] lastPrimaryKey
@@ -67,15 +71,20 @@ loadPrimaryIndex db = do
                 Just v -> checkNext $ index + 1
                 Nothing -> return index
 
-getPrimaryIndex :: TVar Integer -> IO Integer
-getPrimaryIndex incr = atomically $ do
-    v <- readTVar incr
-    writeTVar incr $ v + 1
+readAndIncr :: TVar Integer -> IO Integer
+readAndIncr tvi = atomically $ do
+    v <- readTVar tvi
+    writeTVar tvi $ v + 1
     return v
 
-lastPrimaryKey = lTos $ runPut $ do
-    putWord8 0
-    putWord8 1
+put2Words a b = lTos $ runPut $ do
+    putWord8 a
+    putWord8 b
+
+lastPrimaryKey = put2Words 0 1
+lastIndexKey = put2Words 0 2
+
+integerToWord32 = lTos . runPut . putWord32le . fromIntegral
 
 parseRequest :: Atto.Parser Request
 parseRequest = do
@@ -84,9 +93,9 @@ parseRequest = do
     raw <- Atto.take $ fromIntegral size
     return $ Request rid $ B.fromChunks [raw]
 
-handleRequest :: DB -> TVar Integer -> Request -> IO Builder
+handleRequest :: DB -> TVar Integer -> TVar Integer -> Request -> IO Builder
 
-handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
+handleRequest db _ _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
         Just v -> return $ copyLazyByteString $ makeQueryResponse $ Seq.singleton $ sTol v
@@ -94,16 +103,16 @@ handleRequest db _ (Request MULTI_LEVELDB_GET raw) = do
     where
         obj = decodeProto raw :: Get.GetRequest
 
-handleRequest db incr (Request MULTI_LEVELDB_PUT raw) = do
-    index <- getPrimaryIndex incr
+handleRequest db incr _ (Request MULTI_LEVELDB_PUT raw) = do
+    index <- readAndIncr incr
     let key = makePrimaryKey index
     write db [ ] [ Put key $ lTos $ Put.value obj
-                 , Put lastPrimaryKey $ lTos $ runPut $ putWord32le $ fromIntegral index]
+                 , Put lastPrimaryKey $ integerToWord32 index]
     return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
 
-handleRequest db _ (Request MULTI_LEVELDB_LOOKUP raw) = do
+handleRequest db _ _ (Request MULTI_LEVELDB_LOOKUP raw) = do
     case runGet getDocument $ Lookup.query obj of
         [field] -> do
             withIterator db [ ] $ \iter -> do
@@ -127,9 +136,28 @@ handleRequest db _ (Request MULTI_LEVELDB_LOOKUP raw) = do
                         False -> lookup field iter res
                 False -> return res
 
+-- TODO: Index all the existing records
+handleRequest db _ iincr (Request MULTI_LEVELDB_INDEX raw) = do
+    res <- get db [ ] key
+    case res of
+        Just _ -> return $ copyByteString "INDEX ALREADY EXISTS\r\n"
+        Nothing -> do
+            index <- readAndIncr iincr
+            write db [ ] [ Put key $ integerToWord32 index
+                         , Put (S.snoc (makeIndexKey index) '\NUL') field
+                         , Put lastIndexKey $ integerToWord32 index]
+            return $ copyByteString "OK\r\n"
+    where
+        field = case runGet getDocument $ Index.field obj of
+            [field] -> US.toByteString $ label field
+            otherwise -> error "Multi-field indexes are not supported"
+        key = S.cons indexPrefix $ S.snoc field '\NUL'
+        obj = decodeProto raw :: Index.AddIndex
+
 main = do
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
         incr <- loadPrimaryIndex db
-        runServer (pipe db incr) 4455
+        iincr <- newTVarIO 0
+        runServer (pipe db incr iincr) 4455
     where
-        pipe db incr = RequestPipeline parseRequest (handleRequest db incr) 10
+        pipe db incr iincr = RequestPipeline parseRequest (handleRequest db incr iincr) 10
