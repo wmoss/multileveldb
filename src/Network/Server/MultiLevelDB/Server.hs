@@ -7,7 +7,6 @@ import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as S
 import Blaze.ByteString.Builder (Builder)
 import Blaze.ByteString.Builder.ByteString (copyByteString, copyLazyByteString)
-import Data.Maybe (fromMaybe)
 
 import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
@@ -55,27 +54,18 @@ loadPrimaryIndex :: DB -> IO (TVar Integer)
 loadPrimaryIndex db = do
     last <- get db [ ] lastPrimaryKey
     x <- case last of
-        Just v -> do
-            withIterator db [ ] $ \iter -> do
-              _ <- iterSeek iter $ S.cons keyPrefix v
-              fmap (toInteger . runGet getWord32le . sTol . S.tail) $ checkNext iter
+        Just v -> checkNext $ keyToInteger v
         Nothing -> return 0
     newTVarIO $ x + 1
     where
-        -- Since we don't have transaction support on LevelDB we have to
-        -- search ahead to make sure the value we wrote isn't stale
-        checkNext :: Iterator -> IO S.ByteString
-        checkNext iter = do
-            index <- iterKey iter
-            _ <- iterNext iter
-            valid <- iterValid iter
-            case valid of
-                 True -> do
-                     new <- iterKey iter
-                     if S.head new == keyPrefix
-                       then checkNext iter
-                       else return index
-                 False -> return index
+        keyToInteger = toInteger . runGet getWord32le . sTol
+
+        checkNext :: Integer -> IO Integer
+        checkNext index = do
+            res <- get db [ ] $ makePrimaryKey $ index + 1
+            case res of
+                Just v -> checkNext $ index + 1
+                Nothing -> return index
 
 getPrimaryIndex :: TVar Integer -> IO Integer
 getPrimaryIndex incr = atomically $ do
