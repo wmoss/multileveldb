@@ -127,14 +127,21 @@ handleRequest db _ _ (Request MULTI_LEVELDB_LOOKUP raw) = do
         lookup field iter res = do
             valid <- iterValid iter
             case valid of
-                True -> do
-                    val <- iterValue iter
-                    _   <- iterNext iter
-                    let d = runGet getDocument $ B.fromChunks [val]
-                    case any (== field) d of
-                        True -> lookup field iter $ d : res
-                        False -> lookup field iter res
                 False -> return res
+                True -> do
+                    key <- iterKey iter
+                    case S.head key == keyPrefix of
+                        False -> do
+                            _ <- iterNext iter
+                            lookup field iter res
+                        True -> do
+                            val <- iterValue iter
+                            _   <- iterNext iter
+                            let d = runGet getDocument $ B.fromChunks [val]
+                            case any (== field) d of
+                                True -> lookup field iter $ d : res
+                                False -> lookup field iter res
+
 
 -- TODO: Index all the existing records
 handleRequest db _ iincr (Request MULTI_LEVELDB_INDEX raw) = do
