@@ -22,7 +22,7 @@ import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
 import Network.Server.MultiLevelDB.Proto.Request.MultiLevelDBWireType
 import Network.Server.MultiLevelDB.Proto.Request.GetRequest as Get
 import Network.Server.MultiLevelDB.Proto.Request.PutRequest as Put
-import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
+import Network.Server.MultiLevelDB.Proto.Request.ScanRequest as Scan
 import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
 import Network.Server.MultiLevelDB.Proto.Request.AddIndex as Index
 
@@ -113,19 +113,19 @@ handleRequest db incr _ (Request MULTI_LEVELDB_PUT raw) = do
     where
         obj = decodeProto raw :: Put.PutRequest
 
-handleRequest db _ _ (Request MULTI_LEVELDB_LOOKUP raw) = do
-    case runGet getDocument $ Lookup.query obj of
+handleRequest db _ _ (Request MULTI_LEVELDB_SCAN raw) = do
+    case runGet getDocument $ Scan.query obj of
         [field] -> do
             withIterator db [ ] $ \iter -> do
                 iterFirst iter
-                res <- lookup field iter
+                res <- scan field iter
                 return $ copyLazyByteString $ makeQueryResponse $ Seq.fromList $ map (runPut . putDocument) res
         otherwise -> error "Currently, multifield queries are not supported"
     where
-        obj = decodeProto raw :: Lookup.LookupRequest
+        obj = decodeProto raw :: Scan.ScanRequest
 
-        lookup :: Field -> Iterator -> IO [Document]
-        lookup field iter = do
+        scan :: Field -> Iterator -> IO [Document]
+        scan field iter = do
             valid <- iterValid iter
             case valid of
                 False -> return []
@@ -134,14 +134,14 @@ handleRequest db _ _ (Request MULTI_LEVELDB_LOOKUP raw) = do
                     case S.head key == keyPrefix of
                         False -> do
                             _ <- iterNext iter
-                            lookup field iter
+                            scan field iter
                         True -> do
                             val <- iterValue iter
                             _   <- iterNext iter
                             let d = runGet getDocument $ B.fromChunks [val]
                             case any (== field) d of
-                                True -> fmap (d :) $ lookup field iter
-                                False -> lookup field iter
+                                True -> fmap (d :) $ scan field iter
+                                False -> scan field iter
 
 
 -- TODO: Index all the existing records
