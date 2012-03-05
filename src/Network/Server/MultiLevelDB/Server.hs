@@ -13,8 +13,9 @@ import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
 import Data.Binary.Get (runGet, getWord32le)
 import qualified Data.Sequence as Seq
 import GHC.Word (Word8)
+import qualified Data.UString as US
 
-import Data.Bson (Document, Field)
+import Data.Bson (Document, Field(..), Value(..), Binary(..))
 import Data.Bson.Binary (getDocument, putDocument)
 
 import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
@@ -160,6 +161,23 @@ handleRequest db _ iincr (Request MULTI_LEVELDB_INDEX raw) = do
             otherwise -> error "Multi-field indexes are not supported"
         key = S.cons indexPrefix $ S.snoc field '\NUL'
         obj = decodeProto raw :: Index.AddIndex
+
+handleRequest db _ iincr (Request MULTI_LEVELDB_DUMP _) = do
+    withIterator db [ ] $ \iter -> do
+        iterFirst iter
+        fmap (copyLazyByteString . makeQueryResponse . Seq.fromList) $ dump iter
+    where
+        dump iter = do
+            valid <- iterValid iter
+            case valid of
+                True -> do
+                    key <- iterKey iter
+                    val <- iterValue iter
+                    _   <- iterNext iter
+                    let doc = runPut $ putDocument $ ["key" := (Bin $ Binary key),
+                                                      "value" := (Bin $ Binary val)]
+                    fmap (doc :) $ dump iter
+                False -> return []
 
 main = do
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do

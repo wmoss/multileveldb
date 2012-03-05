@@ -4,6 +4,7 @@ enum MultiLevelDBWireType {
     MULTI_LEVELDB_PUT = 2;
     MULTI_LEVELDB_LOOKUP = 3;
     MULTI_LEVELDB_INDEX = 4;
+    MULTI_LEVELDB_DUMP = 5;
 
     /* Responses */
     MULTI_LEVELDB_QUERY_RESP = 100;
@@ -28,3 +29,5 @@ message QueryResponse {
 message AddIndex {
     required bytes field = 1;
 }
+
+message DumpDatabase {}
