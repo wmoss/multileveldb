@@ -118,30 +118,30 @@ handleRequest db _ _ (Request MULTI_LEVELDB_LOOKUP raw) = do
         [field] -> do
             withIterator db [ ] $ \iter -> do
                 iterFirst iter
-                res <- lookup field iter []
+                res <- lookup field iter
                 return $ copyLazyByteString $ makeQueryResponse $ Seq.fromList $ map (runPut . putDocument) res
         otherwise -> error "Currently, multifield queries are not supported"
     where
         obj = decodeProto raw :: Lookup.LookupRequest
 
-        lookup :: Field -> Iterator -> [Document] -> IO [Document]
-        lookup field iter res = do
+        lookup :: Field -> Iterator -> IO [Document]
+        lookup field iter = do
             valid <- iterValid iter
             case valid of
-                False -> return res
+                False -> return []
                 True -> do
                     key <- iterKey iter
                     case S.head key == keyPrefix of
                         False -> do
                             _ <- iterNext iter
-                            lookup field iter res
+                            lookup field iter
                         True -> do
                             val <- iterValue iter
                             _   <- iterNext iter
                             let d = runGet getDocument $ B.fromChunks [val]
                             case any (== field) d of
-                                True -> lookup field iter $ d : res
-                                False -> lookup field iter res
+                                True -> fmap (d :) $ lookup field iter
+                                False -> lookup field iter
 
 
 -- TODO: Index all the existing records
