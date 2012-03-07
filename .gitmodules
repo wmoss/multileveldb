@@ -1,0 +1,3 @@
+[submodule "contrib/bson-haskell"]
+	path = contrib/bson-haskell
+	url = git@github.com:wmoss/bson-haskell.git
