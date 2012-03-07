@@ -8,15 +8,17 @@ import qualified Data.ByteString.Char8 as S
 import Blaze.ByteString.Builder (Builder)
 import Blaze.ByteString.Builder.ByteString (copyByteString, copyLazyByteString)
 
-import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar)
+import GHC.Conc.Sync (TVar, atomically, newTVarIO, readTVar, writeTVar, readTVarIO)
 import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
 import Data.Binary.Get (runGet, getWord32le)
 import qualified Data.Sequence as Seq
 import GHC.Word (Word8)
 import qualified Data.UString as US
 
+import Data.Maybe (fromJust)
 import Data.Bson (Document, Field(..), Value(..), Binary(..))
 import Data.Bson.Binary (getDocument, putDocument)
+import qualified Data.Map as M
 
 import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
 import Network.Server.MultiLevelDB.Proto.Request.MultiLevelDBWireType
@@ -74,11 +76,21 @@ loadIndex startKey integerToKey db = do
 loadPrimaryIndex = loadIndex lastPrimaryKey makePrimaryKey
 loadIndexIndex = loadIndex lastIndexKey makeIndexKey
 
+loadIndexes :: DB -> TVar Integer -> IO (TVar (M.Map S.ByteString Integer))
+loadIndexes db tvindex = do
+    index <- readTVarIO tvindex
+    set <- fmap (M.fromList . catMaybes) $ loadIndex index
+    newTVarIO set
+    where
+        loadIndex index = do
+            if index /= 0
+              then do
+                field <- get db [ ] $ S.snoc (makeIndexKey index) '\NUL'
+                fmap (fmap (,index) field :) $ loadIndex $ index - 1
+              else return []
+
 readAndIncr :: TVar Integer -> IO Integer
-readAndIncr tvi = atomically $ do
-    v <- readTVar tvi
-    writeTVar tvi $ v + 1
-    return v
+readAndIncr = flip applyTVar $ (+ 1)
 
 put2Words a b = lTos $ runPut $ do
     putWord8 a
@@ -90,6 +102,12 @@ lastIndexKey = put2Words 0 2
 integerToWord32 = lTos . runPut . putWord32le . fromIntegral
 word32ToInteger = toInteger . runGet getWord32le . sTol
 
+applyTVar :: TVar a -> (a -> a) -> IO a
+applyTVar tv f = atomically $ do
+    v <- readTVar tv
+    writeTVar tv $ f v
+    return v
+
 parseRequest :: Atto.Parser Request
 parseRequest = do
     rid <- fmap (toEnum . fromIntegral) AttoB.anyWord32le
@@ -97,9 +115,9 @@ parseRequest = do
     raw <- Atto.take $ fromIntegral size
     return $ Request rid $ B.fromChunks [raw]
 
-handleRequest :: DB -> TVar Integer -> TVar Integer -> Request -> IO Builder
+handleRequest :: DB -> TVar Integer -> TVar Integer -> TVar (M.Map S.ByteString Integer) -> Request -> IO Builder
 
-handleRequest db _ _ (Request MULTI_LEVELDB_GET raw) = do
+handleRequest db _ _ _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
         Just v -> return $ copyLazyByteString $ makeQueryResponse $ Seq.singleton $ sTol v
@@ -107,7 +125,7 @@ handleRequest db _ _ (Request MULTI_LEVELDB_GET raw) = do
     where
         obj = decodeProto raw :: Get.GetRequest
 
-handleRequest db incr _ (Request MULTI_LEVELDB_PUT raw) = do
+handleRequest db incr _ _ (Request MULTI_LEVELDB_PUT raw) = do
     index <- readAndIncr incr
     let key = makePrimaryKey index
     write db [ ] [ Put key $ lTos $ Put.value obj
@@ -115,8 +133,10 @@ handleRequest db incr _ (Request MULTI_LEVELDB_PUT raw) = do
     return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
+        doc = runGet getDocument $ Put.value obj
 
-handleRequest db _ _ (Request MULTI_LEVELDB_SCAN raw) = do
+
+handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
     case runGet getDocument $ Scan.query obj of
         [field] -> do
             withIterator db [ ] $ \iter -> do
@@ -148,7 +168,7 @@ handleRequest db _ _ (Request MULTI_LEVELDB_SCAN raw) = do
 
 
 -- TODO: Index all the existing records
-handleRequest db _ iincr (Request MULTI_LEVELDB_INDEX raw) = do
+handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
     res <- get db [ ] key
     case res of
         Just _ -> return $ copyByteString "INDEX ALREADY EXISTS\r\n"
@@ -157,6 +177,7 @@ handleRequest db _ iincr (Request MULTI_LEVELDB_INDEX raw) = do
             write db [ ] [ Put key $ integerToWord32 index
                          , Put (S.snoc (makeIndexKey index) '\NUL') field
                          , Put lastIndexKey $ integerToWord32 index]
+            applyTVar indexes $ M.insert field index
             return $ copyByteString "OK\r\n"
     where
         field = case runGet getDocument $ Index.field obj of
@@ -165,7 +186,7 @@ handleRequest db _ iincr (Request MULTI_LEVELDB_INDEX raw) = do
         key = S.cons indexPrefix $ S.snoc field '\NUL'
         obj = decodeProto raw :: Index.AddIndex
 
-handleRequest db _ iincr (Request MULTI_LEVELDB_DUMP _) = do
+handleRequest db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
     withIterator db [ ] $ \iter -> do
         iterFirst iter
         fmap (copyLazyByteString . makeQueryResponse . Seq.fromList) $ dump iter
@@ -186,6 +207,7 @@ main = do
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
         incr <- loadPrimaryIndex db
         iincr <- loadIndexIndex db
-        runServer (pipe db incr iincr) 4455
+        indexes <- loadIndexes db iincr
+        runServer (pipe db incr iincr indexes) 4455
     where
-        pipe db incr iincr = RequestPipeline parseRequest (handleRequest db incr iincr) 10
+        pipe db incr iincr indexes = RequestPipeline parseRequest (handleRequest db incr iincr indexes) 10
