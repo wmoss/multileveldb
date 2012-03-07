@@ -15,9 +15,9 @@ import qualified Data.Sequence as Seq
 import GHC.Word (Word8)
 import qualified Data.UString as US
 
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, catMaybes)
 import Data.Bson (Document, Field(..), Value(..), Binary(..))
-import Data.Bson.Binary (getDocument, putDocument)
+import Data.Bson.Binary (getDocument, putDocument, putField)
 import qualified Data.Map as M
 
 import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
@@ -125,11 +125,19 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_GET raw) = do
     where
         obj = decodeProto raw :: Get.GetRequest
 
-handleRequest db incr _ _ (Request MULTI_LEVELDB_PUT raw) = do
+handleRequest db incr _ tvindexes (Request MULTI_LEVELDB_PUT raw) = do
     index <- readAndIncr incr
     let key = makePrimaryKey index
-    write db [ ] [ Put key $ lTos $ Put.value obj
-                 , Put lastPrimaryKey $ integerToWord32 index]
+
+    indexes <- readTVarIO tvindexes
+    let fieldIndex f = fmap (,lTos $ runPut $ putField f) $ flip M.lookup indexes $ US.toByteString $ label f
+    let zero = lTos $ runPut $ putWord8 0
+    let makePut (iindex, bsfield) = flip Put zero $ S.concat [makeIndexKey iindex, bsfield, integerToWord32 index]
+    let indexPuts = map makePut $ catMaybes $ map fieldIndex doc
+    write db [ ] $ [ Put key $ lTos $ Put.value obj
+                   , Put lastPrimaryKey $ integerToWord32 index] ++
+      indexPuts
+
     return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
     where
         obj = decodeProto raw :: Put.PutRequest
