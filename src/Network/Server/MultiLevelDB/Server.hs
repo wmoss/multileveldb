@@ -211,6 +211,19 @@ handleRequest db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
                     fmap (doc :) $ dump iter
                 False -> return []
 
+iterItems iter = do
+    valid <- iterValid iter
+    case valid of
+        False -> return []
+        True -> do
+            key <- iterKey iter
+            val <- iterValue iter
+            _ <- iterNext iter
+            fmap ((key, val) :) $ iterItems iter
+
+iterKeys = fmap (map fst) . iterItems
+iterValues = fmap (map snd) . iterItems
+
 main = do
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
         incr <- loadPrimaryIndex db
