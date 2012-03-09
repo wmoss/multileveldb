@@ -15,6 +15,8 @@ import qualified Data.Sequence as Seq
 import GHC.Word (Word8)
 import qualified Data.UString as US
 
+import Control.Applicative
+import Control.Monad (mapM)
 import Data.Maybe (fromJust, catMaybes)
 import Data.Bson (Document, Field(..), Value(..), Binary(..))
 import Data.Bson.Binary (getDocument, putDocument, putField)
@@ -27,6 +29,7 @@ import Network.Server.MultiLevelDB.Proto.Request.PutRequest as Put
 import Network.Server.MultiLevelDB.Proto.Request.ScanRequest as Scan
 import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
 import Network.Server.MultiLevelDB.Proto.Request.AddIndex as Index
+import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
 
 
 data Request = Request MultiLevelDBWireType B.ByteString
@@ -210,6 +213,24 @@ handleRequest db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
                                                       "value" := (Bin $ Binary val)]
                     fmap (doc :) $ dump iter
                 False -> return []
+
+handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
+    case runGet getDocument $ Lookup.query obj of
+        [field] -> do
+            indexes <- readTVarIO tvindexes
+            case M.lookup (US.toByteString $ label field) indexes of
+                Just index -> do
+                    withIterator db [ ] $ \iter -> do
+                        let bsfield = lTos $ runPut $ putField field
+                        _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
+                        docs <- map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter >>= mapM (get db [ ])
+                        return $ copyLazyByteString $ makeQueryResponse $ Seq.fromList $ map sTol $ catMaybes docs
+                Nothing -> error "Field not indexed"
+        otherwise -> error "Only single index queries are currently supported"
+    where
+        obj = decodeProto raw :: Lookup.LookupRequest
+        getPrimaryKey s = S.drop (S.length s - 4) s
+        equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)
 
 iterItems iter = do
     valid <- iterValid iter
