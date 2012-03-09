@@ -55,22 +55,24 @@ makeKey prefix index = lTos $ runPut $ do
 makePrimaryKey = makeKey 1
 makeIndexKey = makeKey 2
 
-loadPrimaryIndex :: DB -> IO (TVar Integer)
-loadPrimaryIndex db = do
-    last <- get db [ ] lastPrimaryKey
+loadIndex :: S.ByteString -> (Integer -> S.ByteString) -> DB ->
+             IO (TVar Integer)
+loadIndex startKey integerToKey db = do
+    last <- get db [ ] startKey
     x <- case last of
-        Just v -> checkNext $ keyToInteger v
+        Just v -> checkNext $ word32ToInteger v
         Nothing -> return 0
     newTVarIO $ x + 1
     where
-        keyToInteger = toInteger . runGet getWord32le . sTol
-
         checkNext :: Integer -> IO Integer
         checkNext index = do
-            res <- get db [ ] $ makePrimaryKey $ index + 1
+            res <- get db [ ] $ integerToKey $ index + 1
             case res of
                 Just v -> checkNext $ index + 1
                 Nothing -> return index
+
+loadPrimaryIndex = loadIndex lastPrimaryKey makePrimaryKey
+loadIndexIndex = loadIndex lastIndexKey makeIndexKey
 
 readAndIncr :: TVar Integer -> IO Integer
 readAndIncr tvi = atomically $ do
@@ -86,6 +88,7 @@ lastPrimaryKey = put2Words 0 1
 lastIndexKey = put2Words 0 2
 
 integerToWord32 = lTos . runPut . putWord32le . fromIntegral
+word32ToInteger = toInteger . runGet getWord32le . sTol
 
 parseRequest :: Atto.Parser Request
 parseRequest = do
@@ -182,7 +185,7 @@ handleRequest db _ iincr (Request MULTI_LEVELDB_DUMP _) = do
 main = do
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
         incr <- loadPrimaryIndex db
-        iincr <- newTVarIO 0
+        iincr <- loadIndexIndex db
         runServer (pipe db incr iincr) 4455
     where
         pipe db incr iincr = RequestPipeline parseRequest (handleRequest db incr iincr) 10
