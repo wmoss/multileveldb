@@ -1,6 +1,3 @@
-[submodule "contrib/bson-haskell"]
-	path = contrib/bson-haskell
-	url = git@github.com:wmoss/bson-haskell.git
 [submodule "contrib/leveldb-haskell"]
 	path = contrib/leveldb-haskell
 	url = git@github.com:wmoss/leveldb-haskell.git

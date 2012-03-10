@@ -24,7 +24,7 @@ Executable multileveldb
                   scalable-server>=0.2.2 && < 0.3,
                   leveldb-haskell>=0.0.2 && <0.1,
                   binary>=0.5.1 && <0.6,
-                  bson>=0.1.8 && <0.2,
+                  msgpack>=0.7.1.2 && <0.8,
                   containers>=0.4.2.1 && < 0.5
 
   Extensions: OverloadedStrings, TupleSections

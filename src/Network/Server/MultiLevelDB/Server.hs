@@ -17,9 +17,11 @@ import qualified Data.UString as US
 
 import Control.Applicative
 import Control.Monad (mapM)
-import Data.Maybe (fromJust, catMaybes)
-import Data.Bson (Document, Field(..), Value(..), Binary(..))
-import Data.Bson.Binary (getDocument, putDocument, putField)
+import Data.Maybe (fromJust, catMaybes, fromMaybe)
+
+import qualified Data.MessagePack.Unpack as MP
+import qualified Data.MessagePack.Pack as MP
+import qualified Data.MessagePack.Object as MP
 import qualified Data.Map as M
 
 import Text.ProtocolBuffers.WireMessage (messageGet, messagePut)
@@ -129,41 +131,43 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_GET raw) = do
         obj = decodeProto raw :: Get.GetRequest
 
 handleRequest db incr _ tvindexes (Request MULTI_LEVELDB_PUT raw) = do
-    index <- readAndIncr incr
-    let key = makePrimaryKey index
+    case MP.unpack obj of
+        MP.ObjectMap objs -> do
+            index <- readAndIncr incr
+            let key = makePrimaryKey index
 
-    indexes <- readTVarIO tvindexes
-    let fieldIndex f = fmap (,lTos $ runPut $ putField f) $ flip M.lookup indexes $ US.toByteString $ label f
-    let zero = lTos $ runPut $ putWord8 0
-    let makePut (iindex, bsfield) = flip Put zero $ S.concat [makeIndexKey iindex, bsfield, integerToWord32 index]
-    let indexPuts = map makePut $ catMaybes $ map fieldIndex doc
-    write db [ ] $ [ Put key $ lTos $ Put.value obj
-                   , Put lastPrimaryKey $ integerToWord32 index] ++
-      indexPuts
+            indexes <- readTVarIO tvindexes
+            let indexTuple (MP.ObjectRAW k, v) = (, lTos $ MP.pack v) <$> (M.lookup k indexes)
+            let makePut (iindex, bsfield) = flip Put zero $ S.concat [makeIndexKey iindex, bsfield, integerToWord32 index]
+            let indexPuts = map makePut $ catMaybes $ map indexTuple objs
+            write db [ ] $ [ Put key $ lTos obj
+                           , Put lastPrimaryKey $ integerToWord32 index] ++
+              indexPuts
 
-    return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
+            return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
+
+        otherwise -> error "Stored object must be a map type"
     where
-        obj = decodeProto raw :: Put.PutRequest
-        doc = runGet getDocument $ Put.value obj
-
+        obj = Put.value $ decodeProto raw
+        zero = lTos $ runPut $ putWord8 0
 
 handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
-    case runGet getDocument $ Scan.query obj of
-        [field] -> do
+    case obj of
+        MP.ObjectMap [(k, v)] -> do
             withIterator db [ ] $ \iter -> do
                 iterFirst iter
+
                 docs <- iterItems iter
                 return $ copyLazyByteString $ makeResp $ filterDocs docs
                 where
                     makeResp = makeQueryResponse . Seq.fromList . map (sTol . snd)
                     filterDocs = filter filterDoc . filter filterPrefix
                     filterPrefix = (==) keyPrefix . S.head . fst
-                    filterDoc = any (== field) . runGet getDocument . sTol . snd
+                    filterDoc = fromMaybe False . fmap (== v) . M.lookup k . MP.unpack . snd
 
         otherwise -> error "Currently, multifield queries are not supported"
     where
-        obj = decodeProto raw :: Scan.ScanRequest
-
+        obj = MP.unpack $ Scan.query $ decodeProto raw
 
 -- TODO: Index all the existing records
 handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
@@ -178,8 +182,8 @@ handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
             applyTVar indexes $ M.insert field index
             return $ copyByteString "OK\r\n"
     where
-        field = case runGet getDocument $ Index.field obj of
-            [field] -> US.toByteString $ label field
+        field = case MP.unpack $  Index.field obj of
+            [field] -> field
             otherwise -> error "Multi-field indexes are not supported"
         key = S.cons indexPrefix $ S.snoc field '\NUL'
         obj = decodeProto raw :: Index.AddIndex
@@ -187,26 +191,24 @@ handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
 handleRequest db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
     withIterator db [ ] $ \iter -> do
         iterFirst iter
-        fmap (copyLazyByteString . makeQueryResponse . Seq.fromList . map dumpDoc) $ iterItems iter
+        fmap (copyLazyByteString . makeQueryResponse . Seq.fromList . map MP.pack) $ iterItems iter
     where
-        dumpDoc (k, v) = runPut $ putDocument $ ["key" := (Bin $ Binary k),
-                                                 "value" := (Bin $ Binary v)]
 
 handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
-    case runGet getDocument $ Lookup.query obj of
-        [field] -> do
+    case obj of
+        MP.ObjectMap [(MP.ObjectRAW k, v)] -> do
             indexes <- readTVarIO tvindexes
-            case M.lookup (US.toByteString $ label field) indexes of
+            case M.lookup k indexes of
                 Just index -> do
                     withIterator db [ ] $ \iter -> do
-                        let bsfield = lTos $ runPut $ putField field
+                        let bsfield = lTos $ MP.pack v
                         _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
                         docs <- map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter >>= mapM (get db [ ])
                         return $ copyLazyByteString $ makeQueryResponse $ Seq.fromList $ map sTol $ catMaybes docs
                 Nothing -> error "Field not indexed"
         otherwise -> error "Only single index queries are currently supported"
     where
-        obj = decodeProto raw :: Lookup.LookupRequest
+        obj = MP.unpack $ Lookup.query $ decodeProto raw :: MP.Object
         getPrimaryKey s = S.drop (S.length s - 4) s
         equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)
 
