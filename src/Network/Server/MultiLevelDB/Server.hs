@@ -152,30 +152,17 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
         [field] -> do
             withIterator db [ ] $ \iter -> do
                 iterFirst iter
-                res <- scan field iter
-                return $ copyLazyByteString $ makeQueryResponse $ Seq.fromList $ map (runPut . putDocument) res
+                docs <- iterItems iter
+                return $ copyLazyByteString $ makeResp $ filterDocs docs
+                where
+                    makeResp = makeQueryResponse . Seq.fromList . map (sTol . snd)
+                    filterDocs = filter filterDoc . filter filterPrefix
+                    filterPrefix = (==) keyPrefix . S.head . fst
+                    filterDoc = any (== field) . runGet getDocument . sTol . snd
+
         otherwise -> error "Currently, multifield queries are not supported"
     where
         obj = decodeProto raw :: Scan.ScanRequest
-
-        scan :: Field -> Iterator -> IO [Document]
-        scan field iter = do
-            valid <- iterValid iter
-            case valid of
-                False -> return []
-                True -> do
-                    key <- iterKey iter
-                    case S.head key == keyPrefix of
-                        False -> do
-                            _ <- iterNext iter
-                            scan field iter
-                        True -> do
-                            val <- iterValue iter
-                            _   <- iterNext iter
-                            let d = runGet getDocument $ B.fromChunks [val]
-                            case any (== field) d of
-                                True -> fmap (d :) $ scan field iter
-                                False -> scan field iter
 
 
 -- TODO: Index all the existing records
