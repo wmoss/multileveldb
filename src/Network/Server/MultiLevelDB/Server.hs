@@ -232,19 +232,6 @@ handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
         getPrimaryKey s = S.drop (S.length s - 4) s
         equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)
 
-iterItems iter = do
-    valid <- iterValid iter
-    case valid of
-        False -> return []
-        True -> do
-            key <- iterKey iter
-            val <- iterValue iter
-            _ <- iterNext iter
-            fmap ((key, val) :) $ iterItems iter
-
-iterKeys = fmap (map fst) . iterItems
-iterValues = fmap (map snd) . iterItems
-
 main = do
     withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
         incr <- loadPrimaryIndex db
