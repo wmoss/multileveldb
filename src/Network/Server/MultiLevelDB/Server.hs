@@ -187,19 +187,10 @@ handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
 handleRequest db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
     withIterator db [ ] $ \iter -> do
         iterFirst iter
-        fmap (copyLazyByteString . makeQueryResponse . Seq.fromList) $ dump iter
+        fmap (copyLazyByteString . makeQueryResponse . Seq.fromList . map dumpDoc) $ iterItems iter
     where
-        dump iter = do
-            valid <- iterValid iter
-            case valid of
-                True -> do
-                    key <- iterKey iter
-                    val <- iterValue iter
-                    _   <- iterNext iter
-                    let doc = runPut $ putDocument $ ["key" := (Bin $ Binary key),
-                                                      "value" := (Bin $ Binary val)]
-                    fmap (doc :) $ dump iter
-                False -> return []
+        dumpDoc (k, v) = runPut $ putDocument $ ["key" := (Bin $ Binary k),
+                                                 "value" := (Bin $ Binary v)]
 
 handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
     case runGet getDocument $ Lookup.query obj of
