@@ -1,0 +1,19 @@
+TODO:
+
+[ ] Add command to drop the entire database
+[ ] Add command line argument for database location
+[ ] Add a generic response protocol buffer
+[ ] Index existing fields on a call to AddIndex
+[ ] Support deleting records
+[ ] Support deleting indexes
+[ ] Support updating fields within a document
+[ ] Limit the returned results set
+[ ] Chunk the returned results set
+[ ] Support sorting order on returned index querues
+[ ] Support multi-key index queries
+[ ] Tests
+[ ] Write a Python client library
+[ ] Investigate using a State Monad instead of passing all the state through
+[ ] Range queries
+[ ] Add collections
+[ ] Replication
