@@ -28,14 +28,16 @@ import Data.Maybe (catMaybes, fromMaybe)
 import GHC.Conc.Sync (TVar, readTVarIO)
 
 import Text.ProtocolBuffers.WireMessage (messagePut)
+import Text.ProtocolBuffers.Basic (uFromString)
 import Network.Server.MultiLevelDB.Proto.Request.MultiLevelDBWireType
 import Network.Server.MultiLevelDB.Proto.Request.GetRequest as Get
 import Network.Server.MultiLevelDB.Proto.Request.PutRequest as Put
 import Network.Server.MultiLevelDB.Proto.Request.ScanRequest as Scan
-import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
 import Network.Server.MultiLevelDB.Proto.Request.AddIndex as Index
 import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
-
+import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
+import Network.Server.MultiLevelDB.Proto.Request.StatusResponse as Status
+import Network.Server.MultiLevelDB.Proto.Request.StatusResponse.Status as StatusTypes
 
 data Request = Request MultiLevelDBWireType B.ByteString
 
@@ -47,6 +49,7 @@ makeResponse code raw =
         putLazyByteString raw
 
 makeQueryResponse = makeResponse MULTI_LEVELDB_QUERY_RESP . messagePut . Query.QueryResponse
+makeStatusResponse s r = makeResponse MULTI_LEVELDB_STATUS_RESP $ messagePut $ Status.StatusResponse (Just s) r
 
 parseRequest :: Atto.Parser Request
 parseRequest = do
@@ -108,14 +111,14 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
 handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
     res <- get db [ ] key
     case res of
-        Just _ -> return $ copyByteString "INDEX ALREADY EXISTS\r\n"
+        Just _ -> return $ copyLazyByteString $ makeStatusResponse StatusTypes.FAILED $ Just $ uFromString "Index already exists"
         Nothing -> do
             index <- readAndIncr iincr
             write db [ ] [ Put key $ integerToWord32 index
                          , Put (S.snoc (makeIndexKey index) '\NUL') field
                          , Put lastIndexKey $ integerToWord32 index]
             applyTVar indexes $ M.insert field index
-            return $ copyByteString "OK\r\n"
+            return $ copyLazyByteString $ makeStatusResponse StatusTypes.OKAY Nothing
     where
         field = case MP.unpack $  Index.field obj of
             [field] -> field

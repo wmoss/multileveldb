@@ -9,7 +9,10 @@ enum MultiLevelDBWireType {
 
     /* Responses */
     MULTI_LEVELDB_QUERY_RESP = 100;
+    MULTI_LEVELDB_STATUS_RESP = 101;
 }
+
+/* ---------- Requests ---------- */
 
 message GetRequest {
     required bytes key = 1;
@@ -23,10 +26,6 @@ message ScanRequest {
     required bytes query = 1;
 }
 
-message QueryResponse {
-    repeated bytes results = 1;
-}
-
 message AddIndex {
     required bytes field = 1;
 }
@@ -36,3 +35,18 @@ message LookupRequest {
 }
 
 message DumpDatabase {}
+
+/* ---------- Responses ---------- */
+
+message QueryResponse {
+    repeated bytes results = 1;
+}
+
+message StatusResponse {
+    enum Status {
+        OKAY = 1;
+        FAILED = 2;
+    }
+    optional Status status = 1;
+    optional string reason = 2;
+}
