@@ -1,7 +1,7 @@
 TODO:
 
 [ ] Add command to drop the entire database
-[ ] Add command line argument for database location
+[x] Add command line argument for database location
 [ ] Add a generic response protocol buffer
 [ ] Index existing fields on a call to AddIndex
 [ ] Support deleting records

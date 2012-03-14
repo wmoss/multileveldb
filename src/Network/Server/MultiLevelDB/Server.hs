@@ -3,8 +3,8 @@ import Network.Server.ScalableServer
 
 import Network.Server.MultiLevelDB.Util
 import Network.Server.MultiLevelDB.Const
+import Network.Server.MultiLevelDB.Config
 import Network.Server.MultiLevelDB.Request
-
 
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as S
@@ -19,6 +19,7 @@ import Data.Maybe (fromJust, catMaybes, fromMaybe)
 
 import qualified Data.Map as M
 
+import System.Console.CmdArgs (cmdArgs)
 
 loadIndex :: S.ByteString -> (Integer -> S.ByteString) -> DB ->
              IO (TVar Integer)
@@ -53,10 +54,12 @@ loadIndexes db tvindex = do
               else return []
 
 main = do
-    withLevelDB "/tmp/leveltest" [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
+    cfg <- cmdArgs argspec
+
+    withLevelDB (dbPath cfg) [ CreateIfMissing, CacheSize 2048 ] $ \db -> do
         incr <- loadPrimaryIndex db
         iincr <- loadIndexIndex db
         indexes <- loadIndexes db iincr
-        runServer (pipe db incr iincr indexes) 4455
+        runServer (pipe db incr iincr indexes) $ fromIntegral $ port cfg
     where
         pipe db incr iincr indexes = RequestPipeline parseRequest (handleRequest db incr iincr indexes) 10
