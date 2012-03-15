@@ -5,6 +5,8 @@ TODO:
 [x] Add a generic response protocol buffer
 [x] Return a protocol buffer response on a Put
 [ ] Index existing fields on a call to AddIndex
+[ ] Compound indexes (i.e. indexing a field that has a list or a dictionary as a value)
+[ ] Index queries in multiple fields
 [ ] Support deleting records
 [ ] Support deleting indexes
 [ ] Support updating fields within a document
