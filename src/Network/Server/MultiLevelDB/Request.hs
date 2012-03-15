@@ -49,8 +49,8 @@ makeResponse code raw =
         putWord32le $ fromIntegral $ B.length raw
         putLazyByteString raw
 
-makeQueryResponse = makeResponse MULTI_LEVELDB_QUERY_RESP . messagePut . Query.QueryResponse
-makeStatusResponse s r = makeResponse MULTI_LEVELDB_STATUS_RESP $ messagePut $ Status.StatusResponse (Just s) r
+makeQueryResponse = copyLazyByteString . makeResponse MULTI_LEVELDB_QUERY_RESP . messagePut . Query.QueryResponse
+makeStatusResponse s r = copyLazyByteString $ makeResponse MULTI_LEVELDB_STATUS_RESP $ messagePut $ Status.StatusResponse (Just s) r
 
 parseRequest :: Atto.Parser Request
 parseRequest = do
@@ -64,8 +64,8 @@ handleRequest :: DB -> TVar Integer -> TVar Integer -> TVar (M.Map S.ByteString 
 handleRequest db _ _ _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
-        Just v -> return $ copyLazyByteString $ makeQueryResponse $ Seq.singleton $ sTol v
-        Nothing -> return $ copyLazyByteString $ makeQueryResponse $ Seq.empty
+        Just v -> return $ makeQueryResponse $ Seq.singleton $ sTol v
+        Nothing -> return $ makeQueryResponse $ Seq.empty
     where
         obj = decodeProto raw :: Get.GetRequest
 
@@ -97,7 +97,7 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
                 iterFirst iter
 
                 docs <- iterItems iter
-                return $ copyLazyByteString $ makeResp $ filterDocs docs
+                return $ makeResp $ filterDocs docs
                 where
                     makeResp = makeQueryResponse . Seq.fromList . map (sTol . snd)
                     filterDocs = filter filterDoc . filter filterPrefix
@@ -112,14 +112,14 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
 handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
     res <- get db [ ] key
     case res of
-        Just _ -> return $ copyLazyByteString $ makeStatusResponse StatusTypes.FAILED $ Just $ uFromString "Index already exists"
+        Just _ -> return $ makeStatusResponse StatusTypes.FAILED $ Just $ uFromString "Index already exists"
         Nothing -> do
             index <- readAndIncr iincr
             write db [ ] [ Put key $ integerToWord32 index
                          , Put (S.snoc (makeIndexKey index) '\NUL') field
                          , Put lastIndexKey $ integerToWord32 index]
             applyTVar indexes $ M.insert field index
-            return $ copyLazyByteString $ makeStatusResponse StatusTypes.OKAY Nothing
+            return $ makeStatusResponse StatusTypes.OKAY Nothing
     where
         field = case MP.unpack $  Index.field obj of
             [field] -> field
@@ -130,7 +130,7 @@ handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
 handleRequest db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
     withIterator db [ ] $ \iter -> do
         iterFirst iter
-        fmap (copyLazyByteString . makeQueryResponse . Seq.fromList . map MP.pack) $ iterItems iter
+        fmap (makeQueryResponse . Seq.fromList . map MP.pack) $ iterItems iter
     where
 
 handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
@@ -143,7 +143,7 @@ handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
                         let bsfield = lTos $ MP.pack v
                         _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
                         docs <- map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter >>= mapM (get db [ ])
-                        return $ copyLazyByteString $ makeQueryResponse $ Seq.fromList $ map sTol $ catMaybes docs
+                        return $ makeQueryResponse $ Seq.fromList $ map sTol $ catMaybes docs
                 Nothing -> error "Field not indexed"
         otherwise -> error "Only single index queries are currently supported"
     where
