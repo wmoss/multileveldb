@@ -10,6 +10,7 @@ enum MultiLevelDBWireType {
     /* Responses */
     MULTI_LEVELDB_QUERY_RESP = 100;
     MULTI_LEVELDB_STATUS_RESP = 101;
+    MULTI_LEVELDB_PUT_RESP = 102;
 }
 
 /* ---------- Requests ---------- */
@@ -49,4 +50,9 @@ message StatusResponse {
     }
     optional Status status = 1;
     optional string reason = 2;
+}
+
+message PutResponse {
+    required bytes key = 1;
+    required bytes value = 2;
 }

@@ -12,7 +12,7 @@ import Control.Monad (mapM)
 
 import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
 import Blaze.ByteString.Builder (Builder)
-import Blaze.ByteString.Builder.ByteString (copyByteString, copyLazyByteString)
+import Blaze.ByteString.Builder.ByteString (copyLazyByteString)
 
 import qualified Data.Attoparsec as Atto
 import qualified Data.Attoparsec.Binary as AttoB
@@ -37,6 +37,7 @@ import Network.Server.MultiLevelDB.Proto.Request.AddIndex as Index
 import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
 import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
 import Network.Server.MultiLevelDB.Proto.Request.StatusResponse as Status
+import Network.Server.MultiLevelDB.Proto.Request.PutResponse as PutResponse
 import Network.Server.MultiLevelDB.Proto.Request.StatusResponse.Status as StatusTypes
 
 data Request = Request MultiLevelDBWireType B.ByteString
@@ -82,7 +83,7 @@ handleRequest db incr _ tvindexes (Request MULTI_LEVELDB_PUT raw) = do
                            , Put lastPrimaryKey $ integerToWord32 index] ++
               indexPuts
 
-            return $ copyByteString $ S.concat ["OK ", key, "\r\n"]
+            return $ copyLazyByteString $ makeResponse MULTI_LEVELDB_PUT_RESP $ messagePut $ PutResponse.PutResponse (sTol key) obj
 
         otherwise -> error "Stored object must be a map type"
     where

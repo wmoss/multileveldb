@@ -3,7 +3,7 @@ TODO:
 [ ] Add command to drop the entire database
 [x] Add command line argument for database location
 [x] Add a generic response protocol buffer
-[ ] Return a protocol buffer response on a Put
+[x] Return a protocol buffer response on a Put
 [ ] Index existing fields on a call to AddIndex
 [ ] Support deleting records
 [ ] Support deleting indexes
