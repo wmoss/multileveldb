@@ -24,6 +24,7 @@ import qualified Data.MessagePack.Unpack as MP
 import qualified Data.MessagePack.Pack as MP
 import qualified Data.MessagePack.Object as MP
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Monoid (mappend, mempty)
 
 import GHC.Conc.Sync (TVar, readTVarIO)
 
@@ -49,7 +50,19 @@ makeResponse code raw =
         putWord32le $ fromIntegral $ B.length raw
         putLazyByteString raw
 
-makeQueryResponse = copyLazyByteString . makeResponse MULTI_LEVELDB_QUERY_RESP . messagePut . Query.QueryResponse
+queryResponseChunkSize = 100
+makeQueryResponse s = makeQueryResponse' 0 s
+  where
+      total = Seq.length s
+      makeQueryResponse' :: Int -> Seq.Seq B.ByteString -> Builder
+      makeQueryResponse' o s
+          | Seq.null s = mempty
+          | otherwise = mappend nextChunk $ makeQueryResponse' (o + queryResponseChunkSize) $ Seq.drop queryResponseChunkSize s
+              where
+                  nextChunk = copyLazyByteString $ makeResponse MULTI_LEVELDB_QUERY_RESP $ messagePut $ Query.QueryResponse { results = Seq.take queryResponseChunkSize s,
+                                                                                                                              offset = fromIntegral o,
+                                                                                                                              total = fromIntegral total }
+
 makeStatusResponse s r = copyLazyByteString $ makeResponse MULTI_LEVELDB_STATUS_RESP $ messagePut $ Status.StatusResponse (Just s) r
 
 parseRequest :: Atto.Parser Request
