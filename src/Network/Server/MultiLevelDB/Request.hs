@@ -60,7 +60,7 @@ makeQueryResponse s = makeQueryResponse' 0 s
           | otherwise = mappend nextChunk $ makeQueryResponse' (o + queryResponseChunkSize) $ Seq.drop queryResponseChunkSize s
               where
                   nextChunk = copyLazyByteString $ makeResponse MULTI_LEVELDB_QUERY_RESP $ messagePut $ Query.QueryResponse { results = Seq.take queryResponseChunkSize s,
-                                                                                                                              offset = fromIntegral o,
+                                                                                                                              Query.offset = fromIntegral o,
                                                                                                                               total = fromIntegral total }
 
 makeStatusResponse s r = copyLazyByteString $ makeResponse MULTI_LEVELDB_STATUS_RESP $ messagePut $ Status.StatusResponse (Just s) r
@@ -156,10 +156,15 @@ handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
                         let bsfield = lTos $ MP.pack v
                         _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
                         docs <- map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter >>= mapM (get db [ ])
-                        return $ makeQueryResponse $ Seq.fromList $ map sTol $ catMaybes docs
+                        return $ makeQueryResponse $ Seq.take limit $ Seq.drop offset $ Seq.fromList $ map sTol $ catMaybes docs
                 Nothing -> error "Field not indexed"
         otherwise -> error "Only single index queries are currently supported"
     where
-        obj = MP.unpack $ Lookup.query $ decodeProto raw :: MP.Object
+        pb = decodeProto raw
+        obj = MP.unpack $ Lookup.query pb :: MP.Object
+
+        limit = fromIntegral $ fromMaybe 0 $ Lookup.limit pb
+        offset = fromIntegral $ fromMaybe 0 $ Lookup.offset pb
+
         getPrimaryKey s = S.drop (S.length s - 4) s
         equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)

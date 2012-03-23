@@ -10,7 +10,7 @@ TODO:
 [ ] Support deleting records
 [ ] Support deleting indexes
 [ ] Support updating fields within a document
-[ ] Limit the returned results set
+[x] Limit the returned results set
 [x] Chunk the returned results set
 [ ] Support sorting order on returned index querues
 [ ] Support multi-key index queries

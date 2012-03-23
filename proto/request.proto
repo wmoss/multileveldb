@@ -33,6 +33,9 @@ message AddIndex {
 
 message LookupRequest {
     required bytes query = 1;
+
+    optional uint32 limit = 2;
+    optional uint32 offset = 3;
 }
 
 message DumpDatabase {}
