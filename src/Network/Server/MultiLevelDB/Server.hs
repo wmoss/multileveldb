@@ -60,6 +60,5 @@ main = do
         incr <- loadPrimaryIndex db
         iincr <- loadIndexIndex db
         indexes <- loadIndexes db iincr
-        runServer (pipe db incr iincr indexes) $ fromIntegral $ port cfg
-    where
-        pipe db incr iincr indexes = RequestPipeline parseRequest (handleRequest db incr iincr indexes) 10
+        let requestHandler = handleRequest $ RequestState db incr iincr indexes
+        runServer (RequestPipeline parseRequest requestHandler 10) $ fromIntegral $ port cfg

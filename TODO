@@ -16,7 +16,7 @@ TODO:
 [ ] Support multi-key index queries
 [ ] Tests
 [ ] Write a Python client library
-[ ] Investigate using a State Monad instead of passing all the state through
+[x] Investigate using a State Monad instead of passing all the state through
 [ ] Range queries
 [ ] Add collections
 [ ] Replication
