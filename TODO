@@ -20,5 +20,5 @@ TODO:
 [ ] Range queries
 [ ] Add collections
 [ ] Replication
-[ ] Catch all exceptions and return a failed status
+[x] Catch all exceptions and return a failed status
 [ ] Merge Lookup and Scan into one request type

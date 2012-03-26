@@ -9,6 +9,7 @@ import Database.LevelDB
 
 import Control.Applicative
 import Control.Monad (mapM)
+import Control.Exception (handle, SomeException)
 
 import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
 import Blaze.ByteString.Builder (Builder)
@@ -73,8 +74,13 @@ parseRequest = do
     return $ Request rid $ B.fromChunks [raw]
 
 handleRequest :: DB -> TVar Integer -> TVar Integer -> TVar (M.Map S.ByteString Integer) -> Request -> IO Builder
+handleRequest db i ii ix pb = handle errorHandler $ handleRequest db i ii ix pb
+    where
+        errorHandler e = return $ makeStatusResponse StatusTypes.FAILED $ Just $ uFromString $ show (e :: SomeException)
 
-handleRequest db _ _ _ (Request MULTI_LEVELDB_GET raw) = do
+handleRequest' :: DB -> TVar Integer -> TVar Integer -> TVar (M.Map S.ByteString Integer) -> Request -> IO Builder
+
+handleRequest' db _ _ _ (Request MULTI_LEVELDB_GET raw) = do
     res <- get db [ ] $ lTos $ Get.key obj
     case res of
         Just v -> return $ makeQueryResponse $ Seq.singleton $ sTol v
@@ -82,7 +88,7 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_GET raw) = do
     where
         obj = decodeProto raw :: Get.GetRequest
 
-handleRequest db incr _ tvindexes (Request MULTI_LEVELDB_PUT raw) = do
+handleRequest' db incr _ tvindexes (Request MULTI_LEVELDB_PUT raw) = do
     case MP.unpack obj of
         MP.ObjectMap objs -> do
             index <- readAndIncr incr
@@ -103,7 +109,7 @@ handleRequest db incr _ tvindexes (Request MULTI_LEVELDB_PUT raw) = do
         obj = Put.value $ decodeProto raw
         zero = lTos $ runPut $ putWord8 0
 
-handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
+handleRequest' db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
     case obj of
         MP.ObjectMap [(k, v)] -> do
             withIterator db [ ] $ \iter -> do
@@ -122,7 +128,7 @@ handleRequest db _ _ _ (Request MULTI_LEVELDB_SCAN raw) = do
         obj = MP.unpack $ Scan.query $ decodeProto raw
 
 -- TODO: Index all the existing records
-handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
+handleRequest' db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
     res <- get db [ ] key
     case res of
         Just _ -> return $ makeStatusResponse StatusTypes.FAILED $ Just $ uFromString "Index already exists"
@@ -140,13 +146,13 @@ handleRequest db _ iincr indexes (Request MULTI_LEVELDB_INDEX raw) = do
         key = S.cons indexPrefix $ S.snoc field '\NUL'
         obj = decodeProto raw :: Index.AddIndex
 
-handleRequest db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
+handleRequest' db _ iincr _ (Request MULTI_LEVELDB_DUMP _) = do
     withIterator db [ ] $ \iter -> do
         iterFirst iter
         fmap (makeQueryResponse . Seq.fromList . map MP.pack) $ iterItems iter
     where
 
-handleRequest db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
+handleRequest' db _ _ tvindexes (Request MULTI_LEVELDB_LOOKUP raw) = do
     case obj of
         MP.ObjectMap [(MP.ObjectRAW k, v)] -> do
             indexes <- readTVarIO tvindexes
