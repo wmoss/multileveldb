@@ -148,11 +148,8 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
             indexes <- readTVarIO $ tvIndexes state
             case M.lookup k indexes of
                 Just index -> do
-                    withIterator levelDB [ ] $ \iter -> do
-                        let bsfield = lTos $ MP.pack v
-                        _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
-                        docs <- map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter >>= mapM (get levelDB [ ])
-                        return $ makeQueryResponse $ Seq.take limit $ Seq.drop offset $ Seq.fromList $ map sTol $ catMaybes docs
+                    docs <- lookupIndex levelDB index (k, v) >>= mapM (get levelDB [ ])
+                    return $ makeQueryResponse $ Seq.take limit $ Seq.drop offset $ Seq.fromList $ map sTol $ catMaybes docs
 
                 Nothing -> case fromMaybe False $ Lookup.allow_scan pb of
                     False -> error "Field not indexed"
@@ -176,5 +173,11 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
         limit = fromIntegral $ fromMaybe 0 $ Lookup.limit pb
         offset = fromIntegral $ fromMaybe 0 $ Lookup.offset pb
 
+lookupIndex levelDB index (k, v) = do
+    withIterator levelDB [ ] $ \iter -> do
+        let bsfield = lTos $ MP.pack v
+        _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
+        map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter
+    where
         getPrimaryKey s = S.drop (S.length s - 4) s
         equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)
