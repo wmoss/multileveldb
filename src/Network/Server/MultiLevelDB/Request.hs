@@ -181,6 +181,8 @@ handleRequest' state (Request MULTI_LEVELDB_DELETE raw) = do
         levelDB = db state
         obj = MP.unpack $ Delete.query $ decodeProto raw :: MP.Object
 
+handleRequest' _ _ = error "Unknown command"
+
 lookupScan levelDB (k, v) = do
     withIterator levelDB [ ] $ \iter -> do
         iterFirst iter
