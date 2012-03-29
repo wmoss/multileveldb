@@ -2,10 +2,9 @@ enum MultiLevelDBWireType {
     /* Requests */
     MULTI_LEVELDB_GET = 1;
     MULTI_LEVELDB_PUT = 2;
-    MULTI_LEVELDB_SCAN = 3;
+    MULTI_LEVELDB_LOOKUP = 3;
     MULTI_LEVELDB_INDEX = 4;
     MULTI_LEVELDB_DUMP = 5;
-    MULTI_LEVELDB_LOOKUP = 6;
 
     /* Responses */
     MULTI_LEVELDB_QUERY_RESP = 100;
@@ -23,10 +22,6 @@ message PutRequest {
     required bytes value = 1;
 }
 
-message ScanRequest {
-    required bytes query = 1;
-}
-
 message AddIndex {
     required bytes field = 1;
 }
@@ -36,6 +31,8 @@ message LookupRequest {
 
     optional uint32 limit = 2;
     optional uint32 offset = 3;
+
+    optional bool allow_scan = 4 [default = false];
 }
 
 message DumpDatabase {}

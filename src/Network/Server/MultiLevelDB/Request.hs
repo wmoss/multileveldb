@@ -116,24 +116,6 @@ handleRequest' state (Request MULTI_LEVELDB_PUT raw) = do
         obj = Put.value $ decodeProto raw
         zero = lTos $ runPut $ putWord8 0
 
-handleRequest' state (Request MULTI_LEVELDB_SCAN raw) = do
-    case obj of
-        MP.ObjectMap [(k, v)] -> do
-            withIterator (db state) [ ] $ \iter -> do
-                iterFirst iter
-
-                docs <- iterItems iter
-                return $ makeResp $ filterDocs docs
-                where
-                    makeResp = makeQueryResponse . Seq.fromList . map (sTol . snd)
-                    filterDocs = filter filterDoc . filter filterPrefix
-                    filterPrefix = (==) keyPrefix . S.head . fst
-                    filterDoc = fromMaybe False . fmap (== v) . M.lookup k . MP.unpack . snd
-
-        otherwise -> error "Currently, multifield queries are not supported"
-    where
-        obj = MP.unpack $ Scan.query $ decodeProto raw
-
 -- TODO: Index all the existing records
 handleRequest' state (Request MULTI_LEVELDB_INDEX raw) = do
     let levelDB = db state
@@ -171,7 +153,20 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
                         _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
                         docs <- map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter >>= mapM (get levelDB [ ])
                         return $ makeQueryResponse $ Seq.take limit $ Seq.drop offset $ Seq.fromList $ map sTol $ catMaybes docs
-                Nothing -> error "Field not indexed"
+
+                Nothing -> case fromMaybe False $ Lookup.allow_scan pb of
+                    False -> error "Field not indexed"
+                    True -> do
+                        withIterator levelDB [ ] $ \iter -> do
+                            iterFirst iter
+                            docs <- iterItems iter
+                            return $ makeResp $ filterDocs docs
+                        where
+                            makeResp = makeQueryResponse . Seq.take limit . Seq.drop offset . Seq.fromList . map (sTol . snd)
+                            filterDocs = filter filterDoc . filter filterPrefix
+                            filterPrefix = (==) keyPrefix . S.head . fst
+                            filterDoc = fromMaybe False . fmap (== v) . M.lookup k . MP.unpack . snd
+
         otherwise -> error "Only single index queries are currently supported"
     where
         levelDB = db state
