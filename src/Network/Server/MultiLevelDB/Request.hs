@@ -154,15 +154,9 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
                 Nothing -> case fromMaybe False $ Lookup.allow_scan pb of
                     False -> error "Field not indexed"
                     True -> do
-                        withIterator levelDB [ ] $ \iter -> do
-                            iterFirst iter
-                            docs <- iterItems iter
-                            return $ makeResp $ filterDocs docs
+                        makeResp <$> lookupScan levelDB (k, v)
                         where
                             makeResp = makeQueryResponse . Seq.take limit . Seq.drop offset . Seq.fromList . map (sTol . snd)
-                            filterDocs = filter filterDoc . filter filterPrefix
-                            filterPrefix = (==) keyPrefix . S.head . fst
-                            filterDoc = fromMaybe False . fmap (== v) . M.lookup k . MP.unpack . snd
 
         otherwise -> error "Only single index queries are currently supported"
     where
@@ -172,6 +166,15 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
 
         limit = fromIntegral $ fromMaybe 0 $ Lookup.limit pb
         offset = fromIntegral $ fromMaybe 0 $ Lookup.offset pb
+
+lookupScan levelDB (k, v) = do
+    withIterator levelDB [ ] $ \iter -> do
+        iterFirst iter
+        filterDocs <$> iterItems iter
+    where
+        filterDocs = filter filterDoc . filter filterPrefix
+        filterPrefix = (==) keyPrefix . S.head . fst
+        filterDoc = fromMaybe False . fmap (== v) . M.lookup k . MP.unpack . snd
 
 lookupIndex levelDB index (k, v) = do
     withIterator levelDB [ ] $ \iter -> do
