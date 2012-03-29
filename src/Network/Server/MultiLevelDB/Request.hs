@@ -146,18 +146,11 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
     case obj of
         MP.ObjectMap [(MP.ObjectRAW k, v)] -> do
             indexes <- readTVarIO $ tvIndexes state
-            case M.lookup k indexes of
-                Just index -> do
-                    docs <- lookupIndex levelDB index (k, v) >>= mapM (get levelDB [ ])
-                    return $ makeQueryResponse $ Seq.take limit $ Seq.drop offset $ Seq.fromList $ map sTol $ catMaybes docs
-
+            makeResp <$> case M.lookup k indexes of
+                Just index -> fmap catMaybes $ lookupIndex levelDB index (k, v) >>= mapM (get levelDB [ ])
                 Nothing -> case fromMaybe False $ Lookup.allow_scan pb of
                     False -> error "Field not indexed"
-                    True -> do
-                        makeResp <$> lookupScan levelDB (k, v)
-                        where
-                            makeResp = makeQueryResponse . Seq.take limit . Seq.drop offset . Seq.fromList . map (sTol . snd)
-
+                    True -> map snd <$> lookupScan levelDB (k, v)
         otherwise -> error "Only single index queries are currently supported"
     where
         levelDB = db state
@@ -166,6 +159,8 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
 
         limit = fromIntegral $ fromMaybe 0 $ Lookup.limit pb
         offset = fromIntegral $ fromMaybe 0 $ Lookup.offset pb
+
+        makeResp = makeQueryResponse . Seq.take limit . Seq.drop offset . Seq.fromList . map sTol
 
 lookupScan levelDB (k, v) = do
     withIterator levelDB [ ] $ \iter -> do
