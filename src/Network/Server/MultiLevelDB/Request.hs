@@ -37,6 +37,7 @@ import Network.Server.MultiLevelDB.Proto.Request.PutRequest as Put
 import Network.Server.MultiLevelDB.Proto.Request.ScanRequest as Scan
 import Network.Server.MultiLevelDB.Proto.Request.AddIndex as Index
 import Network.Server.MultiLevelDB.Proto.Request.LookupRequest as Lookup
+import Network.Server.MultiLevelDB.Proto.Request.DeleteRequest as Delete
 import Network.Server.MultiLevelDB.Proto.Request.QueryResponse as Query
 import Network.Server.MultiLevelDB.Proto.Request.StatusResponse as Status
 import Network.Server.MultiLevelDB.Proto.Request.PutResponse as PutResponse
@@ -147,7 +148,7 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
         MP.ObjectMap [(MP.ObjectRAW k, v)] -> do
             indexes <- readTVarIO $ tvIndexes state
             makeResp <$> case M.lookup k indexes of
-                Just index -> fmap catMaybes $ lookupIndex levelDB index (k, v) >>= mapM (get levelDB [ ])
+                Just index -> fmap catMaybes $ map getPrimaryKeyFromIndex <$> scanIndex levelDB index (k, v) >>= mapM (get levelDB [ ])
                 Nothing -> case fromMaybe False $ Lookup.allow_scan pb of
                     False -> error "Field not indexed"
                     True -> map snd <$> lookupScan levelDB (k, v)
@@ -162,6 +163,24 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
 
         makeResp = makeQueryResponse . Seq.take limit . Seq.drop offset . Seq.fromList . map sTol
 
+-- TODO : Put the deleted indexes on the free list
+handleRequest' state (Request MULTI_LEVELDB_DELETE raw) = do
+    case obj of
+        MP.ObjectMap [(MP.ObjectRAW k, v)] -> do
+            indexes <- readTVarIO $ tvIndexes state
+            write (db state) [ ] =<< case M.lookup k indexes of
+                Just index -> do
+                    indexKeys <- scanIndex levelDB index (k, v)
+                    let keys = map getPrimaryKeyFromIndex indexKeys
+                    return $ map Del $ indexKeys ++ keys
+                Nothing -> do
+                    map (Del . fst) <$> lookupScan levelDB (k, v)
+            return $ makeStatusResponse StatusTypes.OKAY Nothing
+        otherwise -> error "Only single index queries are currently supported"
+    where
+        levelDB = db state
+        obj = MP.unpack $ Delete.query $ decodeProto raw :: MP.Object
+
 lookupScan levelDB (k, v) = do
     withIterator levelDB [ ] $ \iter -> do
         iterFirst iter
@@ -171,11 +190,14 @@ lookupScan levelDB (k, v) = do
         filterPrefix = (==) keyPrefix . S.head . fst
         filterDoc = fromMaybe False . fmap (== v) . M.lookup k . MP.unpack . snd
 
-lookupIndex levelDB index (k, v) = do
+scanIndex levelDB index (k, v) = do
     withIterator levelDB [ ] $ \iter -> do
         let bsfield = lTos $ MP.pack v
         _ <- iterSeek iter $ S.concat [makeIndexKey index, bsfield]
-        map (S.cons keyPrefix . getPrimaryKey) . takeWhile (equalsField bsfield) <$> iterKeys iter
+        takeWhile (equalsField bsfield) <$> iterKeys iter
+    where
+        equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)
+
+getPrimaryKeyFromIndex = S.cons keyPrefix . getPrimaryKey
     where
         getPrimaryKey s = S.drop (S.length s - 4) s
-        equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)
