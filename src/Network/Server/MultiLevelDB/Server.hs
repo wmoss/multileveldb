@@ -14,6 +14,7 @@ import qualified Data.Sequence as Seq
 import GHC.Word (Word8)
 
 import Control.Applicative
+import Control.Concurrent (myThreadId)
 import Control.Monad (mapM)
 import Data.Maybe (fromJust, catMaybes, fromMaybe)
 
@@ -60,5 +61,6 @@ main = do
         incr <- loadPrimaryIndex db
         iincr <- loadIndexIndex db
         indexes <- loadIndexes db iincr
-        let requestHandler = handleRequest $ RequestState db incr iincr indexes
+        threadId <- myThreadId
+        let requestHandler = handleRequest $ RequestState db incr iincr indexes threadId
         runServer (RequestPipeline parseRequest requestHandler 10) $ fromIntegral $ port cfg

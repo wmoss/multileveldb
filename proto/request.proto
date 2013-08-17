@@ -5,6 +5,7 @@ enum MultiLevelDBWireType {
     MULTI_LEVELDB_LOOKUP = 3;
     MULTI_LEVELDB_INDEX = 4;
     MULTI_LEVELDB_DUMP = 5;
+    MULTI_LEVELDB_DROP = 6;
 
     /* Responses */
     MULTI_LEVELDB_QUERY_RESP = 100;
@@ -36,6 +37,12 @@ message LookupRequest {
 }
 
 message DumpDatabase {}
+
+/* confirm must be set to "YES" */
+message DropDatabase {
+    required string confirm = 1;
+}
+
 
 /* ---------- Responses ---------- */
 

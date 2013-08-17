@@ -7,9 +7,10 @@ import Network.Server.MultiLevelDB.Const
 
 import Database.LevelDB
 
+import Control.Concurrent (ThreadId, throwTo)
 import Control.Applicative
 import Control.Monad (mapM)
-import Control.Exception (handle, SomeException)
+import Control.Exception (handle, Exception, SomeException)
 
 import Data.Binary.Put (runPut, putWord32le, putWord8, putLazyByteString)
 import Blaze.ByteString.Builder (Builder)
@@ -26,6 +27,7 @@ import qualified Data.MessagePack.Pack as MP
 import qualified Data.MessagePack.Object as MP
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Monoid (mappend, mempty)
+import Data.Typeable (Typeable)
 
 import GHC.Conc.Sync (TVar, readTVarIO)
 
@@ -77,8 +79,14 @@ data RequestState = RequestState {
     db            :: DB,
     tvKeyIndex    :: TVar Integer,
     tvIndexIndex  :: TVar Integer,
-    tvIndexes     :: TVar (M.Map S.ByteString Integer)
+    tvIndexes     :: TVar (M.Map S.ByteString Integer),
+    mainThreadId  :: ThreadId
     }
+
+data DatabaseDropped = DatabaseDropped
+     deriving (Show, Typeable)
+
+instance Exception DatabaseDropped
 
 handleRequest :: RequestState -> Request -> IO Builder
 handleRequest state pb = handle errorHandler $ handleRequest' state pb
@@ -178,3 +186,11 @@ handleRequest' state (Request MULTI_LEVELDB_LOOKUP raw) = do
 
         getPrimaryKey s = S.drop (S.length s - 4) s
         equalsField f k = f == (S.take (S.length k - 9) $ S.drop 5 k)
+
+handleRequest' state (Request MULTI_LEVELDB_DROP raw) = do
+    case Drop.confirm pb == "YES" of
+        True -> do
+            throwTo (mainThreadId state) DatabaseDropped
+            return $ makeStatusResponse StatusTypes.OKAY Nothing
+where
+        pb = decodeProto raw
