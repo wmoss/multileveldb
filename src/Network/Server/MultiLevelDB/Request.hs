@@ -124,7 +124,7 @@ handleRequest' state (Request MULTI_LEVELDB_INDEX raw) = do
     case res of
         Just _ -> return $ makeStatusResponse StatusTypes.FAILED $ Just $ uFromString "Index already exists"
         Nothing -> do
-            index <- readAndIncr $ tvKeyIndex state
+            index <- readAndIncr $ tvIndexIndex state
             write levelDB [ ] [ Put key $ integerToWord32 index
                               , Put (S.snoc (makeIndexKey index) '\NUL') field
                               , Put lastIndexKey $ integerToWord32 index]
