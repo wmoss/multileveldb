@@ -27,6 +27,9 @@ applyTVar tv f = atomically $ do
 readAndIncr :: TVar Integer -> IO Integer
 readAndIncr = flip applyTVar $ (+ 1)
 
+readAndIncrBy :: TVar Integer -> Integer -> IO Integer
+readAndIncrBy tv i = applyTVar tv (+ i)
+
 put2Words a b = lTos $ runPut $ do
     putWord8 a
     putWord8 b

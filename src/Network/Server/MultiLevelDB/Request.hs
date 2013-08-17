@@ -174,7 +174,11 @@ handleRequest' state (Request MULTI_LEVELDB_DELETE raw) = do
                     let keys = map getPrimaryKeyFromIndex indexKeys
                     return $ map Del $ indexKeys ++ keys
                 Nothing -> do
-                    map (Del . fst) <$> lookupScan levelDB (k, v)
+                    keys <- lookupScan levelDB (k, v)
+                    readAndIncrBy freeIndex
+                    return $ map (Del . fst) keys ++ map (Put . S.tail . fst
+
+                              --map (Put . fst) keys)
             return $ makeStatusResponse StatusTypes.OKAY Nothing
         otherwise -> error "Only single index queries are currently supported"
     where
